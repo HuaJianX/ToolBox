@@ -20,6 +20,9 @@ public partial class App : Application
         AppLog.Write($"文档转换引擎：{ConversionService.DocumentEngineName}；" +
                      $"PDF 转图片引擎：{ConversionService.PdfImageEngineName}");
 
+        // 后台把 LibreOffice 的用户配置先建好：第一次转换能从 15 秒降到 6 秒
+        ToolBox.Services.Converters.LibreOfficeConverter.WarmUpInBackground();
+
         DispatcherUnhandledException += (_, args) =>
         {
             AppLog.Write(args.Exception);

@@ -37,9 +37,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- 免安装的第三方转换组件（ffmpeg / poppler / pandoc）放在仓库根目录的 tools 下，
-         发布时会被复制到程序目录的 tools 子目录，实现“离线可用”。
+    <!-- 免安装的第三方转换组件（ffmpeg / poppler / pandoc / LibreOffice）放在仓库根目录的 tools 下，
+         发布时复制到程序目录的 tools 子目录，实现“离线可用”。
          .downloads 是下载缓存，.ps1 / .md 是说明和脚本，都不该进安装包。
+
+         只设 CopyToPublishDirectory、不设 CopyToOutputDirectory：
+         tools 下现在有 1.2 GB（LibreOffice 占大头），往每个 build 输出目录都复制一份
+         会白占好几 GB 磁盘；开发和跑自检时，ToolLocator 会从程序目录往上找到仓库根的
+         tools，所以不复制也能正常测。
 
          ExcludeFromSingleFile 很关键：这些是"要被当子进程执行"的 exe，
          必须实实在在躺在磁盘上。不排除的话，单文件发布会把它们塞进 exe 内部，
@@ -47,7 +52,6 @@
     <None Include="..\..\tools\**\*"
           Exclude="..\..\tools\*.ps1;..\..\tools\**\*.md;..\..\tools\.downloads\**\*"
           Link="tools\%(RecursiveDir)%(Filename)%(Extension)"
-          CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest"
           ExcludeFromSingleFile="true"
           Condition="Exists('..\..\tools')" />

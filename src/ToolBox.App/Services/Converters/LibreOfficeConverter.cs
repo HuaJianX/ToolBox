@@ -8,6 +8,69 @@ namespace ToolBox.Services.Converters;
 /// </summary>
 internal static class LibreOfficeConverter
 {
+    /// <summary>
+    /// LibreOffice 的用户配置目录要复用，不能一次一个。
+    /// 实测：每次新建配置，一次转换要 14–15 秒；复用现成配置只要 6 秒 ——
+    /// 因为它每次都要重新初始化一遍配置，那部分白等。
+    /// 代价是同一个配置目录不能被两个 soffice 同时用，所以用信号量排队。
+    /// </summary>
+    private static readonly SemaphoreSlim Gate = new(1, 1);
+
+    internal static string ProfileDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        AppPaths.AppFolderName,
+        "office-profile");
+
+    /// <summary>
+    /// 启动时在后台把配置先建好。这样用户第一次点「开始转换」就是 6 秒，而不是干等 15 秒。
+    /// 失败了也无所谓，真正转换的时候会自己再建一次。
+    /// </summary>
+    public static void WarmUpInBackground()
+    {
+        var soffice = ToolLocator.Find(ToolKind.Soffice);
+        if (soffice is null) return;
+
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                Directory.CreateDirectory(ProfileDirectory);
+
+                var startInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = soffice,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                };
+                foreach (var argument in new[]
+                {
+                    "--headless", "--norestore", "--invisible", "--nolockcheck", "--nodefault",
+                    "--terminate_after_init",
+                    "-env:UserInstallation=" + new Uri(ProfileDirectory).AbsoluteUri,
+                })
+                {
+                    startInfo.ArgumentList.Add(argument);
+                }
+
+                using var process = System.Diagnostics.Process.Start(startInfo);
+                process?.WaitForExit(60_000);
+                AppLog.Write("LibreOffice 配置预热完成");
+            }
+            catch (Exception exception)
+            {
+                AppLog.Write("LibreOffice 预热失败（不影响使用）：" + exception.Message);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "toolbox-lo-warmup",
+        };
+
+        thread.Start();
+    }
+
     public static async Task<ConversionOutcome> ConvertAsync(
         ConversionJob job,
         IProgress<ProgressInfo> progress,
@@ -25,14 +88,16 @@ internal static class LibreOfficeConverter
             job.OutputDirectory,
             Path.GetFileNameWithoutExtension(job.SourcePath) + "." + job.TargetExtension));
 
-        progress.Report(ProgressInfo.Busy("正在转换文档…（第一次用会慢一点，请稍等）"));
+        progress.Report(ProgressInfo.Busy("正在转换文档…"));
 
         var workDirectory = FileUtil.CreateTempDirectory("office");
+
+        // 排队：同一个用户配置目录同一时刻只能被一个 soffice 用
+        await Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            // 每次转换都用独立的用户配置目录：
-            // 一是不跟用户自己打开的 LibreOffice 抢锁，二是可以同时转多个文件。
-            var profileUri = new Uri(Path.Combine(workDirectory, "profile")).AbsoluteUri;
+            Directory.CreateDirectory(ProfileDirectory);
+            var profileUri = new Uri(ProfileDirectory).AbsoluteUri;
 
             var arguments = new List<string>
             {
@@ -81,6 +146,7 @@ internal static class LibreOfficeConverter
         }
         finally
         {
+            Gate.Release();
             FileUtil.TryDeleteDirectory(workDirectory);
         }
     }
