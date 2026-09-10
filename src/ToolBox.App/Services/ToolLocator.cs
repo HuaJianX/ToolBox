@@ -70,6 +70,18 @@ public static class ToolLocator
         return "组件自检：" + string.Join("；", parts);
     }
 
+    /// <summary>
+    /// 程序是不是装在纯英文路径下。
+    ///
+    /// 这个判断有实际用处：poppler 的 Windows 构建是按 exe 自己的路径去推数据目录
+    /// （share/poppler/nameToUnicode 之类）的，路径里只要有中文，它就找不到那些映射表。
+    /// 后果是抽 CJK（中文）PDF 的文字时会得到空结果 —— 实测过。
+    /// 所以装在中文路径下时要绕开 poppler，至少也得把原因说清楚，
+    /// 而不是让用户以为自己的 PDF 是扫描件。
+    /// </summary>
+    public static bool InstalledInAsciiPath =>
+        AppContext.BaseDirectory.All(character => character <= 0x7F);
+
     private static string? Locate(ToolKind kind)
     {
         var fileNames = FileNamesFor(kind);

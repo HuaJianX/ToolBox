@@ -1,6 +1,7 @@
 using System.Text;
 using ToolBox.Models;
 using ToolBox.Services;
+using ToolBox.ViewModels;
 
 // 冒烟测试：直接调用程序里的转换引擎，不开界面。
 // 核心思想是「能转的真的转一遍，不能转的提示要说人话」。
@@ -156,11 +157,33 @@ else
     if (File.Exists(wav)) Pass("合成测试音频", $"{new FileInfo(wav).Length} 字节");
     else Fail("合成测试音频", "ffmpeg 没生成 WAV，后面的音视频测试没法做");
 
+    var audioOutputs = new Dictionary<string, string>();
     foreach (var target in new[] { "mp3", "flac", "m4a" })
     {
         var outcome = await RunAsync(wav, target, CategoryKind.Audio);
-        if (Produced(outcome)) Pass($"WAV -> {target.ToUpperInvariant()}", SizeOf(outcome));
-        else Fail($"WAV -> {target.ToUpperInvariant()}", outcome.Message);
+        if (Produced(outcome))
+        {
+            Pass($"WAV -> {target.ToUpperInvariant()}", SizeOf(outcome));
+            audioOutputs[target] = outcome.OutputPaths[0];
+        }
+        else
+        {
+            Fail($"WAV -> {target.ToUpperInvariant()}", outcome.Message);
+        }
+    }
+
+    // 反向：之前一直只从 WAV 往外转，从没验过「已经从 WAV 转出来的文件再转回去」
+    foreach (var (from, to) in new[] { ("mp3", "wav"), ("mp3", "flac"), ("flac", "mp3"), ("m4a", "wav") })
+    {
+        if (!audioOutputs.TryGetValue(from, out var reverseSource))
+        {
+            Skip($"{from.ToUpperInvariant()} -> {to.ToUpperInvariant()}", "上游那个转换没成功");
+            continue;
+        }
+
+        var outcome = await RunAsync(reverseSource, to, CategoryKind.Audio);
+        if (Produced(outcome)) Pass($"{from.ToUpperInvariant()} -> {to.ToUpperInvariant()}", SizeOf(outcome));
+        else Fail($"{from.ToUpperInvariant()} -> {to.ToUpperInvariant()}", outcome.Message);
     }
 
     var mp4 = Path.Combine(root, "测试视频.mp4");
@@ -174,6 +197,7 @@ else
     else Fail("合成测试视频", "ffmpeg 没生成 MP4，后面的视频测试没法做");
 
     // 视频转码 + 顺带验证进度解析（这一段的解析逻辑最容易出错）
+    var videoOutputs = new Dictionary<string, string>();
     foreach (var target in new[] { "mkv", "avi", "mov" })
     {
         var job = new ConversionJob(mp4, outputDirectory, target, CategoryKind.Video);
@@ -182,6 +206,7 @@ else
 
         if (Produced(outcome))
         {
+            videoOutputs[target] = outcome.OutputPaths[0];
             var fractions = reporter.Values.Where(v => !v.IsIndeterminate).Select(v => v.Fraction).ToList();
             var progressNote = fractions.Count > 0
                 ? $"，进度上报 {fractions.Count} 次（最高 {fractions.Max():P0}）"
@@ -199,6 +224,20 @@ else
         {
             Fail($"MP4 -> {target.ToUpperInvariant()}", outcome.Message);
         }
+    }
+
+    // 反向：之前源文件一直是 MP4，从没试过拿 MKV / AVI 当输入
+    foreach (var (from, to) in new[] { ("mkv", "mp4"), ("avi", "mkv"), ("mov", "avi"), ("mkv", "mov") })
+    {
+        if (!videoOutputs.TryGetValue(from, out var reverseSource))
+        {
+            Skip($"{from.ToUpperInvariant()} -> {to.ToUpperInvariant()}", "上游那个转换没成功");
+            continue;
+        }
+
+        var outcome = await RunAsync(reverseSource, to, CategoryKind.Video);
+        if (Produced(outcome)) Pass($"{from.ToUpperInvariant()} -> {to.ToUpperInvariant()}", SizeOf(outcome));
+        else Fail($"{from.ToUpperInvariant()} -> {to.ToUpperInvariant()}", outcome.Message);
     }
 
     // 提取声音
@@ -305,6 +344,145 @@ else
     var outcome = await RunAsync(plainText, "pdf", CategoryKind.Document);
     if (Produced(outcome)) Pass("TXT -> PDF", SizeOf(outcome));
     else Fail("TXT -> PDF", outcome.Message);
+
+    // 三种真正的 Office 格式。之前只验过 TXT，docx/xlsx/pptx 一次都没跑过。
+    foreach (var (fixtureName, label) in new[]
+             {
+                 ("sample-word.docx", "Word"),
+                 ("sample-excel.xlsx", "Excel"),
+                 ("sample-slides.pptx", "PPT"),
+             })
+    {
+        var fixture = FindAsset(Path.Combine("tests", "assets", fixtureName));
+        if (fixture is null)
+        {
+            Skip($"{label} -> PDF", $"没找到 tests/assets/{fixtureName}");
+            continue;
+        }
+
+        var doc = await RunAsync(fixture, "pdf", CategoryKind.Document);
+        if (Produced(doc)) Pass($"{label} -> PDF", SizeOf(doc));
+        else Fail($"{label} -> PDF", doc.Message);
+    }
+
+    // Markdown -> PDF 的完整链路：Pandoc 排版成 docx，再交给 LibreOffice 出 PDF
+    var markdown = Path.Combine(root, "笔记.md");
+    await File.WriteAllTextAsync(markdown, "# 标题\n\n这是**正文**内容。\n\n- 项目一\n- 项目二\n", new UTF8Encoding(false));
+
+    var markdownOutcome = await RunAsync(markdown, "pdf", CategoryKind.Document);
+    if (Produced(markdownOutcome)) Pass("Markdown -> PDF", SizeOf(markdownOutcome));
+    else Fail("Markdown -> PDF", markdownOutcome.Message);
+}
+
+// =====================================================================
+Console.WriteLine();
+Console.WriteLine("7. 批量 + 界面那套流程（直接驱动 MainViewModel）");
+
+var batchFolder = Path.Combine(root, "批量素材");
+Directory.CreateDirectory(batchFolder);
+for (var index = 1; index <= 3; index++)
+{
+    using var image = new ImageMagick.MagickImage(
+        ImageMagick.MagickColors.CornflowerBlue, (uint)(40 + (index * 10)), 30u);
+    image.Format = ImageMagick.MagickFormat.Png;
+    image.Write(Path.Combine(batchFolder, $"批量图{index}.png"));
+}
+
+var viewModel = new MainViewModel();
+viewModel.OpenCategory(viewModel.Categories.First(category => category.Kind == CategoryKind.Image));
+
+if (viewModel.IsConvert && !viewModel.IsHome) Pass("点大按钮进入转换页", "IsConvert=true");
+else Fail("点大按钮进入转换页", $"IsHome={viewModel.IsHome}");
+
+viewModel.AddFiles(Directory.GetFiles(batchFolder));
+if (viewModel.Files.Count == 3) Pass("选文件", $"列表里 3 个");
+else Fail("选文件", $"期望 3 个，实际 {viewModel.Files.Count}");
+
+var preselected = viewModel.Targets.FirstOrDefault(item => item.IsSelected);
+if (preselected is not null && preselected.Option.Extension != "png")
+    Pass("默认格式自动推荐", $"自动选中「{preselected.Option.Label}」（没推荐和源文件一样的格式）");
+else
+    Fail("默认格式自动推荐", preselected is null ? "一个都没选中" : $"选中了「{preselected.Option.Label}」，和源格式一样，不合理");
+
+if (viewModel.CanStart) Pass("可以开始", "CanStart=true");
+else Fail("可以开始", "CanStart=false，按钮会是灰的");
+
+await viewModel.StartAsync();
+
+if (viewModel.IsFinished && viewModel.StatusText == "转换好了")
+    Pass("批量跑完的提示", $"StatusText=「{viewModel.StatusText}」，{viewModel.FinishedText.Replace("\n", " ")}");
+else
+    Fail("批量跑完的提示", $"IsFinished={viewModel.IsFinished} StatusText=「{viewModel.StatusText}」");
+
+// 清理批量测试写进真实输出目录的文件
+foreach (var leftover in Directory.GetFiles(AppPaths.OutputRoot, "批量图*"))
+    FileUtil.TryDeleteFile(leftover);
+
+// =====================================================================
+Console.WriteLine();
+Console.WriteLine("8. 取消（要真的把子进程杀掉，并且不留半个坏文件）");
+
+if (!Has(ToolKind.Ffmpeg))
+{
+    Skip("取消", "没有 FFmpeg，没法造长视频");
+}
+else
+{
+    var ffmpegPath = ToolLocator.Require(ToolKind.Ffmpeg);
+    var longVideo = Path.Combine(root, "长视频.mp4");
+
+    // 这台机器 32 个逻辑核心，转码快得离谱：720p/15 秒只要 0.5 秒，1080p/30 秒也只要 1.8 秒。
+    // 所以素材得做够大（1080p / 45 秒），而且取消要按得早（400 毫秒），才来得及打断。
+    await ProcessRunner.RunAsync(ffmpegPath,
+    [
+        "-y", "-hide_banner", "-loglevel", "error",
+        "-f", "lavfi", "-i", "testsrc=size=1920x1080:rate=30:duration=45",
+        "-f", "lavfi", "-i", "sine=frequency=440:duration=45",
+        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-shortest", longVideo
+    ]);
+
+    if (!File.Exists(longVideo))
+    {
+        Skip("取消", "长视频没造出来");
+    }
+    else
+    {
+        var cancelViewModel = new MainViewModel();
+        cancelViewModel.OpenCategory(cancelViewModel.Categories.First(c => c.Kind == CategoryKind.Video));
+        cancelViewModel.AddFiles([longVideo]);
+        cancelViewModel.SelectTarget(cancelViewModel.Targets.First(t => t.Option.Extension == "mkv"));
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var running = cancelViewModel.StartAsync();
+        await Task.Delay(400);
+        cancelViewModel.Cancel();
+        await running;
+        stopwatch.Stop();
+
+        if (cancelViewModel.StatusText.Contains("取消"))
+            Pass("取消能停下来", $"{stopwatch.Elapsed.TotalSeconds:N1} 秒内响应，提示「{cancelViewModel.StatusText}」");
+        else
+            Fail("取消能停下来", $"提示是「{cancelViewModel.StatusText}」");
+
+        // 取消后不该在「转换结果」里留下转了一半的视频
+        var half = Path.Combine(AppPaths.OutputRoot, "长视频.mkv");
+        if (File.Exists(half))
+        {
+            Fail("取消不留半个坏文件", $"{half} 还在（{new FileInfo(half).Length} 字节）");
+            FileUtil.TryDeleteFile(half);
+        }
+        else
+        {
+            Pass("取消不留半个坏文件", "输出目录里没有残留");
+        }
+
+        // 取消后要能接着转下一批
+        if (cancelViewModel.IsReadyToStart || cancelViewModel.IsFinished)
+            Pass("取消后状态正常", "还能继续用，不用重启");
+        else
+            Fail("取消后状态正常", $"IsConverting={cancelViewModel.IsConverting}");
+    }
 }
 
 // =====================================================================

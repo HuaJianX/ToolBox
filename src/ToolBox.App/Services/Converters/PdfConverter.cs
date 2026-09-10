@@ -79,10 +79,19 @@ internal static class PdfConverter
 
         progress.Report(ProgressInfo.Busy("正在把 PDF 里的文字抽出来…"));
 
-        var result = await ProcessRunner.RunAsync(
-            pdfToText,
-            ["-enc", "UTF-8", "-nopgbrk", job.SourcePath, outputPath],
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+        ProcessResult result;
+        try
+        {
+            result = await ProcessRunner.RunAsync(
+                pdfToText,
+                ["-enc", "UTF-8", "-nopgbrk", job.SourcePath, outputPath],
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            FileUtil.TryDeleteFile(outputPath);
+            throw;
+        }
 
         if (!File.Exists(outputPath))
         {
@@ -95,7 +104,15 @@ internal static class PdfConverter
         var info = new FileInfo(outputPath);
         if (info.Length < 16)
         {
-            try { File.Delete(outputPath); } catch { /* 删不掉也无所谓 */ }
+            FileUtil.TryDeleteFile(outputPath);
+
+            // 还有一种情况会抽出空文件：程序装在中文路径下，
+            // poppler 找不到它自己的 nameToUnicode 映射表（中文 PDF 必用），
+            // 这时候要怪路径，不能怪用户的 PDF。
+            if (!ToolLocator.InstalledInAsciiPath)
+                return ConversionOutcome.Fail(
+                    "文字没抽出来。程序现在装在带中文的文件夹里，poppler 组件在中文路径下会失效。" +
+                    "把这个程序文件夹挪到纯英文路径（比如 C:\\ToolBox）就好了。");
 
             return ConversionOutcome.Fail(
                 "这个 PDF 是扫描件，里面没有可以直接取的文字。可以改用「PDF 转图片」，或者用带文字识别的工具。");

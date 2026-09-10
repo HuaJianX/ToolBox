@@ -81,6 +81,8 @@ internal static class ImageConverter
         }
         catch (OperationCanceledException)
         {
+            // 取消时可能已经写了一半，删掉，别在「转换结果」里留个坏图片
+            FileUtil.TryDeleteFile(outputPath);
             throw;
         }
         catch (MagickException exception)

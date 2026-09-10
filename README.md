@@ -32,6 +32,10 @@ Windows 桌面上的文件格式转换工具。**完全离线、不依赖任何�
 不需要先装任何东西。整个文件夹也能拷到 U 盘，走到哪用到哪。
 唯一的环境要求是 Windows 10 2004（19041）以上。
 
+> ⚠️ **请把程序放在纯英文路径下**（默认装在 `%LOCALAPPDATA%\Programs\ToolBox\`）。
+> poppler 在带中文的路径下抽不出中文 PDF 的文字，原因见下面「硬知识 5」。
+> 桌面快捷方式的显示名是中文，那个随便改，不影响。
+
 `ToolLocator.cs` 的搜索顺序是
 **程序目录 `tools\` → 从程序目录往上找 `tools\` → 组件常见安装位置 → 系统 PATH**，
 所以开发和跑测试时不用复制组件，发布时自动跟着走。
@@ -66,10 +70,11 @@ dotnet run --project tests\ToolBox.SmokeTest -c Release
 ```
 
 设计要点：**装了组件就做真实转换，没装就退回去验证「缺组件时的中文提示」**，
-所以在任何机器上跑都不会「假绿」。本机（组件全自带）实测：
+所以在任何机器上跑都不会「假绿」。它还会直接驱动 `MainViewModel`，
+把界面上那套「点按钮 → 选文件 → 开始 → 转换好了」的流程也跑一遍。本机实测：
 
 ```
-结果：通过 26 项，失败 0 项，跳过 0 项（总共 23.6 秒）
+结果：通过 46 项，失败 0 项，跳过 0 项（总共 33 秒）
 ```
 
 | 验证内容 | 实测结果 |
@@ -77,14 +82,24 @@ dotnet run --project tests\ToolBox.SmokeTest -c Release
 | PNG → JPG / PNG / WEBP / BMP / TIFF | ✅ 5 种全部产出 |
 | **HEIC → JPG / PNG / WEBP**（真实 1440×960 样张） | ✅ 全部产出 |
 | WAV → MP3 / FLAC / M4A | ✅ 全部产出 |
+| **MP3 → WAV / FLAC**、**FLAC → MP3**、**M4A → WAV** | ✅ 反向也验了（之前只从 WAV 往外转） |
 | MP4 → MKV / AVI / MOV | ✅ 全部产出 |
+| **MKV → MP4**、**AVI → MKV**、**MOV → AVI**、**MKV → MOV** | ✅ 非 MP4 源也验了 |
 | MP4 → 只要声音（MP3） | ✅ 产出 |
-| FFmpeg 进度解析 | ✅ 走自带的 **ffprobe**，百分比准确 |
-| PDF → PNG | ✅ 走自带的 **Poppler** |
-| PDF → TXT | ✅ 抽出内容正确 |
-| **PDF → Word** | ✅ 走自带的 **LibreOffice** |
-| TXT → PDF | ✅ 走自带的 **LibreOffice**（引擎自检报告确认） |
+| FFmpeg 进度解析 | ✅ 走自带的 ffprobe，百分比准确 |
+| PDF → PNG / TXT / Word | ✅ 走自带的 Poppler 和 LibreOffice |
+| TXT → PDF | ✅ |
+| **Word(docx) → PDF** | ✅ 27,154 字节 |
+| **Excel(xlsx) → PDF** | ✅ 42,808 字节 |
+| **PPT(pptx) → PDF** | ✅ 27,130 字节 |
+| **Markdown → PDF**（Pandoc 排版 + LibreOffice 出稿） | ✅ 24,651 字节 |
+| **批量**（驱动 MainViewModel 一次转 3 个） | ✅ 列表 3 个、默认格式自动推荐、提示「全部 3 个都转换好了」 |
+| **取消**（1080p 素材转码途中按取消） | ✅ 0.5 秒响应，提示「已经取消了」，**不留半个坏文件** |
+| 断网可用 | ✅ 源码里没有任何联网代码，程序集也没引用 `System.Net.*` |
 | HEIC 拒绝提示、坏文件提示、缺组件提示 | ✅ 全是人话 |
+
+`tests/assets/` 里带了三个自己造的 Office 测试素材（docx / xlsx / pptx），
+Markdown 素材是运行时现生成的，所以这几条验证换了机器也能复现。
 
 > HEIC 样张有第三方版权、**没有放进仓库**，所以全新克隆下来跑会是
 > **25 项通过 + 1 项跳过**（跳过时会打印原因，不会假装通过）。
@@ -112,7 +127,7 @@ dotnet run --project tests\ToolBox.SmokeTest -c Release
 
 ---
 
-## 实测出来的四个硬知识
+## 实测出来的六个硬知识
 
 ### 1. HEIC 只能读、不能写
 
@@ -158,10 +173,48 @@ ffmpeg 也一样：有 `libx265` 但**没有 HEIF/HEIC 封装器**（实测
 - 用户本来就开着 Word 时 COM 会附着到他的实例上，这时**绝不能改 `Visible`、
   绝不能 `Quit`**，否则会弄丢人家没保存的东西
 
+### 5. poppler 处理不了非 ASCII 路径（所以程序必须装在纯英文目录）
+
+这个是补测 `docx/xlsx/pptx → PDF` 时顺带撞出来的，也是最隐蔽的一个：
+
+```
+程序装在  ...\Programs\电脑工具百宝箱\      ← 中文路径
+pdftotext 报 I/O Error: Couldn't open 'nameToUnicode' file
+           '...\Programs\<b5><e7><c4><d4><b9><a4><be><df><b0><d9><b1><a6><cf><e4>\...'
+抽中文 PDF 的文字 → 空文件
+```
+
+路径里的 `电脑工具百宝箱` 被当成 GBK 字节打成 `<b5><e7>...` ——
+poppler 是**按 exe 自己的路径去推数据目录**（`share/poppler/nameToUnicode/`）的，
+路径里有中文就找不到那些字体映射表。而中文 PDF 基本都用 CID 字体，**必须要这张表**。
+所以症状是：**只有中文 PDF 会失败，而且失败得很安静（抽出空文件）**。
+英文 PDF（比如 `dummy.pdf`）照样能转，所以自检一开始没发现。
+
+试过但没用的办法：
+- `POPPLER_DATADIR` 环境变量 —— poppler 根本不认
+- 8.3 短路径 —— `电脑工~1` 还是中文
+- 把输入输出文件换成纯 ASCII 名再暂存转回 —— 没用，坏的是安装路径本身
+- 让 LibreOffice 导纯文本 —— 实测 `txt:Text` / `txt` / `Text` 三种过滤器都不出文件
+
+**最终解法：程序装在纯英文路径下**（`%LOCALAPPDATA%\Programs\ToolBox\`，
+桌面快捷方式的显示名仍然是中文）。实测中文路径下抽出来是空文件、
+英文路径下抽出来是 `测试标题 / 这是正文内容。 / 项目一 / 项目二`，完全正确。
+
+代码里也加了兜底：`ToolLocator.InstalledInAsciiPath` 会检测安装路径，
+真是被放到中文目录里时，PDF 转文字失败会给一句准确的话
+（「程序现在装在带中文的文件夹里，poppler 组件在中文路径下会失效，
+挪到纯英文路径就好了」），而不是误导用户说「你这是个扫描件」。
+
+### 6. 取消要顺手清掉半成品
+
+用户点「取消」时，ffmpeg 往往已经写出半个文件了。不清理的话，
+「转换结果」里会躺着一个**看着像成功、其实打不开**的文件 —— 这比报错更坑人。
+所以 `FfmpegConverter` / `ImageConverter` / `PdfConverter` 都在取消时删掉自己的半成品，
+自检里也专门验了这一条（取消后输出目录必须没有残留）。
+
 ---
 
 ## 打安装包
-
 ```powershell
 winget install --id JRSoftware.InnoSetup      # 只需装一次
 powershell -ExecutionPolicy Bypass -File installer\build-installer.ps1

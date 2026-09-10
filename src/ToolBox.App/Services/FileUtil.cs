@@ -64,6 +64,23 @@ public static class FileUtil
         }
     }
 
+    /// <summary>
+    /// 删一个文件，失败就算了。
+    /// 主要用在「用户中途取消」的时候：把转了一半的坏文件清掉，
+    /// 否则「转换结果」里会留下一个看起来像成功、其实打不开的文件。
+    /// </summary>
+    public static void TryDeleteFile(string file)
+    {
+        try
+        {
+            if (File.Exists(file)) File.Delete(file);
+        }
+        catch
+        {
+            // 文件可能还被外部程序占着，删不掉就算了。
+        }
+    }
+
     /// <summary>把字节数说成人话，用在界面提示里。</summary>
     public static string DescribeSize(long bytes)
     {

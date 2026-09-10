@@ -49,25 +49,36 @@ internal static class FfmpegConverter
 
         var lastFraction = 0d;
 
-        var result = await ProcessRunner.RunAsync(
-            ffmpeg,
-            arguments,
-            onOutputLine: line =>
-            {
-                if (totalSeconds <= 0) return;
+        ProcessResult result;
+        try
+        {
+            result = await ProcessRunner.RunAsync(
+                ffmpeg,
+                arguments,
+                onOutputLine: line =>
+                {
+                    if (totalSeconds <= 0) return;
 
-                var seconds = ParseOutTime(line);
-                if (seconds < 0) return;
+                    var seconds = ParseOutTime(line);
+                    if (seconds < 0) return;
 
-                var fraction = Math.Clamp(seconds / totalSeconds, 0, 1);
+                    var fraction = Math.Clamp(seconds / totalSeconds, 0, 1);
 
-                // 每变化 0.5% 才通知界面一次，避免几千次跨线程调用把界面拖卡。
-                if (fraction - lastFraction < 0.005 && fraction < 1) return;
-                lastFraction = fraction;
-                progress.Report(new ProgressInfo(fraction, busyMessage));
-            },
-            onErrorLine: null,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+                    // 每变化 0.5% 才通知界面一次，避免几千次跨线程调用把界面拖卡。
+                    if (fraction - lastFraction < 0.005 && fraction < 1) return;
+                    lastFraction = fraction;
+                    progress.Report(new ProgressInfo(fraction, busyMessage));
+                },
+                onErrorLine: null,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // 用户点了取消。ffmpeg 此时很可能已经写了一半文件，
+            // 不删掉的话「转换结果」里会躺着一个看着像成功、其实打不开的文件。
+            FileUtil.TryDeleteFile(outputPath);
+            throw;
+        }
 
         if (!result.Succeeded || !File.Exists(outputPath))
         {
