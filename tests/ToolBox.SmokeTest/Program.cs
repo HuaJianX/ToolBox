@@ -49,8 +49,12 @@ static string? FindAsset(string relativePath)
 
 static bool Has(ToolKind kind) => ToolLocator.Find(kind) is not null;
 
-var root = Path.Combine(Path.GetTempPath(), "toolbox-smoke-" + Guid.NewGuid().ToString("N")[..6]);
-var outputDirectory = Path.Combine(root, "转换结果");
+// 可选：命令行给一个已存在的目录，就把它当输出目录（方便人工检查产出长什么样）。
+// 不给就用临时目录，跑完自己删干净。
+var explicitOutput = args.Length > 0 && Directory.Exists(args[0]) ? args[0] : null;
+
+var root = explicitOutput ?? Path.Combine(Path.GetTempPath(), "toolbox-smoke-" + Guid.NewGuid().ToString("N")[..6]);
+var outputDirectory = explicitOutput is null ? Path.Combine(root, "转换结果") : explicitOutput;
 Directory.CreateDirectory(outputDirectory);
 
 Console.WriteLine($"测试工作目录：{root}");
@@ -183,8 +187,13 @@ else
                 ? $"，进度上报 {fractions.Count} 次（最高 {fractions.Max():P0}）"
                 : "，但一次百分比进度都没收到";
             Pass($"MP4 -> {target.ToUpperInvariant()}", SizeOf(outcome) + progressNote);
-            if (fractions.Count == 0) Fail("FFmpeg 进度解析", "总时长为 2 秒却收不到任何百分比");
-            else Pass("FFmpeg 进度解析", $"收到 {fractions.Count} 次，最高 {fractions.Max():P0}，末次 {fractions[fractions.Count - 1]:P0}");
+            if (fractions.Count == 0)
+                Fail("FFmpeg 进度解析", Has(ToolKind.Ffprobe)
+                    ? "总时长为 2 秒却收不到任何百分比"
+                    : "收不到百分比 —— 说明「没有 ffprobe 时改用 ffmpeg 读时长」的兜底没生效");
+            else
+                Pass("FFmpeg 进度解析", $"收到 {fractions.Count} 次，最高 {fractions.Max():P0}，末次 {fractions[fractions.Count - 1]:P0}" +
+                     (Has(ToolKind.Ffprobe) ? "（走 ffprobe）" : "（本机没 ffprobe，走的是 ffmpeg 读时长兜底）"));
         }
         else
         {
@@ -204,19 +213,20 @@ Console.WriteLine("5. PDF 工具");
 
 var pdfSample = FindAsset(Path.Combine("tests", "assets", "dummy.pdf"));
 
-if (!Has(ToolKind.PdfToPpm))
-{
-    Console.WriteLine("  （本机没有 Poppler，改成验证「缺组件」的提示）");
+// PDF 转图片和 PDF 转文字用的是两套独立机制，分开验证，谁也不拖累谁。
+Console.WriteLine($"  （转图片引擎：{ConversionService.PdfImageEngineName}）");
 
+if (!ConversionService.CanRenderPdfToImages)
+{
     var placeholder = Path.Combine(root, "占位.pdf");
     await File.WriteAllBytesAsync(placeholder, new byte[64]);
     var outcome = await RunAsync(placeholder, "png", CategoryKind.Pdf);
-    if (!outcome.Success && outcome.Message.Contains("组件")) Pass("PDF 转图片（缺组件）", outcome.Message);
-    else Fail("PDF 转图片（缺组件）", outcome.Success ? "居然成功了？" : outcome.Message);
+    if (!outcome.Success && outcome.Message.Contains("组件")) Pass("PDF 转图片（本机没引擎，验证提示）", outcome.Message);
+    else Fail("PDF 转图片（没引擎的提示）", outcome.Success ? "居然成功了？" : outcome.Message);
 }
 else if (pdfSample is null)
 {
-    Skip("PDF 工具", "没找到 tests/assets/dummy.pdf");
+    Skip("PDF -> 图片", "没找到 tests/assets/dummy.pdf");
 }
 else
 {
@@ -225,7 +235,22 @@ else
         Pass("PDF -> PNG", $"{pageImages.OutputPaths.Count} 张图，第一张 {new FileInfo(pageImages.OutputPaths[0]).Length} 字节");
     else
         Fail("PDF -> PNG", pageImages.Message);
+}
 
+if (!ConversionService.CanExtractPdfText)
+{
+    var placeholder = Path.Combine(root, "占位2.pdf");
+    await File.WriteAllBytesAsync(placeholder, new byte[64]);
+    var outcome = await RunAsync(placeholder, "txt", CategoryKind.Pdf);
+    if (!outcome.Success && outcome.Message.Contains("组件")) Pass("PDF 转文字（本机没组件，验证提示）", outcome.Message);
+    else Fail("PDF 转文字（缺组件的提示）", outcome.Success ? "居然成功了？" : outcome.Message);
+}
+else if (pdfSample is null)
+{
+    Skip("PDF -> 文字", "没找到 tests/assets/dummy.pdf");
+}
+else
+{
     var text = await RunAsync(pdfSample, "txt", CategoryKind.Pdf);
     if (Produced(text))
     {
@@ -240,19 +265,37 @@ else
     }
 }
 
+// PDF 转 Word 只有装了 LibreOffice 才做得到，这里验证「做不到时提示是人话」。
+if (pdfSample is not null)
+{
+    var toWord = await RunAsync(pdfSample, "docx", CategoryKind.Pdf);
+    if (Has(ToolKind.Soffice))
+    {
+        if (Produced(toWord)) Pass("PDF -> Word", SizeOf(toWord));
+        else Fail("PDF -> Word", toWord.Message);
+    }
+    else if (!toWord.Success && toWord.Message.Contains("LibreOffice"))
+    {
+        Pass("PDF 转 Word（缺 LibreOffice 的提示）", toWord.Message);
+    }
+    else
+    {
+        Fail("PDF 转 Word（缺 LibreOffice 的提示）", toWord.Success ? "居然成功了？" : toWord.Message);
+    }
+}
+
 // =====================================================================
 Console.WriteLine();
 Console.WriteLine("6. 文档转 PDF");
+Console.WriteLine($"  （本机实际使用的引擎：{ConversionService.DocumentEngineName}）");
 
-if (!Has(ToolKind.Soffice))
+if (!ConversionService.CanConvertDocuments)
 {
-    Console.WriteLine("  （本机没有 LibreOffice，改成验证「缺组件」的提示）");
-
     var placeholder = Path.Combine(root, "占位.docx");
     await File.WriteAllBytesAsync(placeholder, new byte[64]);
     var outcome = await RunAsync(placeholder, "pdf", CategoryKind.Document);
-    if (!outcome.Success && outcome.Message.Contains("组件")) Pass("文档转 PDF（缺组件）", outcome.Message);
-    else Fail("文档转 PDF（缺组件）", outcome.Success ? "居然成功了？" : outcome.Message);
+    if (!outcome.Success && outcome.Message.Contains("文档")) Pass("文档转 PDF（没引擎，验证提示）", outcome.Message);
+    else Fail("文档转 PDF（没引擎的提示）", outcome.Success ? "居然成功了？" : outcome.Message);
 }
 else
 {
@@ -269,7 +312,14 @@ Console.WriteLine();
 Console.WriteLine(new string('-', 64));
 Console.WriteLine($"结果：通过 {passed} 项，失败 {failed} 项，跳过 {skipped} 项。");
 
-try { Directory.Delete(root, recursive: true); } catch { /* 留着也不碍事 */ }
+if (explicitOutput is null)
+{
+    try { Directory.Delete(root, recursive: true); } catch { /* 留着也不碍事 */ }
+}
+else
+{
+    Console.WriteLine($"（输出目录是你指定的，没有删：{explicitOutput}）");
+}
 
 return failed == 0 ? 0 : 1;
 

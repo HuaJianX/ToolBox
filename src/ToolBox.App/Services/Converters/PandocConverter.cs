@@ -45,9 +45,10 @@ internal static class PandocConverter
                 return await ConvertAsPlainTextAsync(job, progress, cancellationToken).ConfigureAwait(false);
             }
 
-            // 交给 LibreOffice 收尾，产出文件仍然用原始文件名，用户看到的就是「笔记.pdf」。
-            return await LibreOfficeConverter
-                .ConvertAsync(job, progress, cancellationToken, intermediateDocx)
+            // 交给下一个人收尾（LibreOffice 或本机 Office），产出文件仍然用原始文件名，
+            // 用户看到的就是「笔记.pdf」。
+            return await ConversionService
+                .ConvertPlainDocumentAsync(job, progress, cancellationToken, intermediateDocx)
                 .ConfigureAwait(false);
         }
         finally
@@ -71,8 +72,8 @@ internal static class PandocConverter
 
             File.Copy(job.SourcePath, plainTextPath, overwrite: true);
 
-            return await LibreOfficeConverter
-                .ConvertAsync(job, progress, cancellationToken, plainTextPath)
+            return await ConversionService
+                .ConvertPlainDocumentAsync(job, progress, cancellationToken, plainTextPath)
                 .ConfigureAwait(false);
         }
         finally

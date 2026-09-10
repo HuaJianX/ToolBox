@@ -9,25 +9,31 @@
     下载内容：
       FFmpeg     音视频转换（约 106 MB，gyan.dev 的 essentials 构建，
                  含 libmp3lame / libx264 / libvorbis / aac）
-      Poppler    PDF 转图片 / 转文字（约 20 MB）
-      Pandoc     Markdown 排版（约 30 MB，可选：没有它也能转，只是不排版）
+      Poppler    PDF 转图片 / 转文字（约 40 MB）
+      Pandoc     Markdown 排版（约 40 MB，可选：没有它也能转，只是不排版）
 
     LibreOffice（文档转 PDF 用，约 350 MB）默认不下载，因为它本来就是独立安装的软件，
     程序会自动去 C:\Program Files\LibreOffice 找。想一起装可以加 -IncludeLibreOffice。
 
-    优先用系统自带的 curl.exe 下载：比 Invoke-WebRequest 快很多，也不吃内存。
+    下载方式：用系统自带的 curl.exe 分段并行下载。
+    很多网络对单个连接限速（实测单连接 54 KB/s，8 个连接能到 266 KB/s，快约 5 倍），
+    所以默认把文件切成若干段同时下、再拼起来；服务器不支持分段会自动退回单连接。
     Windows PowerShell 5.1 和 PowerShell 7 都能跑。
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File tools\get-tools.ps1
-    powershell -ExecutionPolicy Bypass -File tools\get-tools.ps1 -SkipFfmpeg
+    powershell -ExecutionPolicy Bypass -File tools\get-tools.ps1 -SkipFfmpeg -Connections 16
 #>
 [CmdletBinding()]
 param(
     [switch]$SkipFfmpeg,
     [switch]$SkipPoppler,
     [switch]$SkipPandoc,
-    [switch]$IncludeLibreOffice
+    [switch]$IncludeLibreOffice,
+
+    # 分段并行下载用几个连接。网络对单连接限速时，调大能明显变快。
+    [ValidateRange(1, 32)]
+    [int]$Connections = 8
 )
 
 $ErrorActionPreference = 'Stop'
@@ -38,6 +44,8 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 
 $toolsRoot = $PSScriptRoot
 $downloadRoot = Join-Path $toolsRoot '.downloads'
+$partRoot = Join-Path $downloadRoot 'parts'
+$oneMb = 1MB
 
 function Write-Step([string]$Message) {
     Write-Host ''
@@ -50,6 +58,134 @@ function Get-CurlPath {
     $onPath = Get-Command curl.exe -ErrorAction SilentlyContinue
     if ($onPath) { return $onPath.Source }
     return $null
+}
+
+# 用一次「只取第 0 个字节」的请求问出文件总大小，顺便验证服务器支不支持分段。
+function Get-RemoteSize([string]$Curl, [string]$Url) {
+    $headers = & $Curl -sL --max-time 40 -r 0-0 -D - -o NUL $Url 2>&1
+    foreach ($line in $headers) {
+        if ($line -match '^content-range:\s*bytes\s+\d+-\d+/(\d+)') { return [int64]$Matches[1] }
+    }
+    return 0   # 取不到（或服务器不支持 Range）就返回 0，调用方会退回单连接
+}
+
+function Remove-Parts {
+    if (Test-Path $partRoot) { Remove-Item $partRoot -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+# 分段并行下载。成功返回 $true；任何一步不对劲都返回 $false，由调用方单连接重来。
+function Invoke-SegmentedDownload {
+    param(
+        [Parameter(Mandatory)][string]$Curl,
+        [Parameter(Mandatory)][string]$Url,
+        [Parameter(Mandatory)][string]$Target,
+        [Parameter(Mandatory)][int64]$Total,
+        [Parameter(Mandatory)][int]$Segments
+    )
+
+    Remove-Parts
+    New-Item -ItemType Directory -Path $partRoot -Force | Out-Null
+
+    $chunk = [int64][math]::Ceiling($Total / $Segments)
+    $jobs = @()
+
+    for ($i = 0; $i -lt $Segments; $i++) {
+        $from = $i * $chunk
+        if ($from -ge $Total) { break }
+        $to = [math]::Min($from + $chunk - 1, $Total - 1)
+        $part = Join-Path $partRoot ("part{0:D3}.bin" -f $i)
+
+        $jobs += [pscustomobject]@{
+            Index    = $i
+            Path     = $part
+            Expected = $to - $from + 1
+            Process  = Start-Process -FilePath $Curl -PassThru -WindowStyle Hidden -ArgumentList @(
+                '-sL', '--fail', '--retry', '3', '--retry-delay', '2',
+                '--max-time', '3600',
+                '-r', "$from-$to",
+                '-o', $part,
+                $Url
+            )
+        }
+    }
+
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    foreach ($job in $jobs) { $job.Process | Wait-Process -ErrorAction SilentlyContinue }
+    $sw.Stop()
+
+    # 每一段都必须拿到预期字节数。少一个字节就说明服务器没按 Range 返回，整批作废。
+    foreach ($job in $jobs) {
+        if (-not (Test-Path $job.Path)) { Write-Warning "    第 $($job.Index) 段没落盘"; return $false }
+        $actual = (Get-Item $job.Path).Length
+        if ($actual -ne $job.Expected) {
+            Write-Warning "    第 $($job.Index) 段大小不对（要 $($job.Expected)，实际 $actual）"
+            return $false
+        }
+    }
+
+    # 按顺序拼起来
+    $outStream = [System.IO.File]::Create($Target)
+    try {
+        foreach ($job in ($jobs | Sort-Object Index)) {
+            $inStream = [System.IO.File]::OpenRead($job.Path)
+            try { $inStream.CopyTo($outStream, $oneMb) } finally { $inStream.Dispose() }
+        }
+    }
+    finally { $outStream.Dispose() }
+
+    $finalSize = (Get-Item $Target).Length
+    if ($finalSize -ne $Total) {
+        Write-Warning "    拼起来之后大小不对（要 $Total，实际 $finalSize）"
+        return $false
+    }
+
+    $seconds = [math]::Max($sw.Elapsed.TotalSeconds, 0.001)
+    Write-Host ("    {0} 个连接并行，{1:N1} 秒，平均 {2:N2} MB/s" -f `
+        $Segments, $seconds, (($finalSize / $oneMb) / $seconds))
+    return $true
+}
+
+function Save-Download {
+    param([Parameter(Mandatory)][string]$Url)
+
+    $name = Split-Path $Url -Leaf
+    $target = Join-Path $downloadRoot $name
+    if (Test-Path $target) {
+        $size = [math]::Round((Get-Item $target).Length / $oneMb, 1)
+        Write-Host "    已经下载过了：$name（$size MB）"
+        return $target
+    }
+
+    $curl = Get-CurlPath
+    $total = 0
+    if ($curl) { $total = Get-RemoteSize $curl $Url }
+
+    if ($curl -and $total -gt (8 * $oneMb) -and $Connections -gt 1) {
+        $segments = [Math]::Min($Connections, [Math]::Max(2, [int][math]::Floor($total / $oneMb)))
+        Write-Host ("    大小 {0:N1} MB，切成 {1} 段并行下载…" -f ($total / $oneMb), $segments)
+
+        if (Invoke-SegmentedDownload -Curl $curl -Url $Url -Target $target -Total $total -Segments $segments) {
+            Remove-Parts
+            Write-Host ("    下载完成：{0} MB" -f [math]::Round((Get-Item $target).Length / $oneMb, 1))
+            return $target
+        }
+
+        Write-Warning '    分段下载失败，改用单连接重来'
+        Remove-Item $target -Force -ErrorAction SilentlyContinue
+        Remove-Parts
+    }
+
+    Write-Host "    正在下载 $name ..."
+    if ($curl) {
+        & $curl -L --fail --retry 3 --retry-delay 2 -o $target $Url
+        if ($LASTEXITCODE -ne 0) { throw "下载失败（curl 退出码 $LASTEXITCODE）：$Url" }
+    }
+    else {
+        Invoke-WebRequest -Uri $Url -OutFile $target -MaximumRedirection 10
+    }
+
+    Write-Host ("    下载完成：{0} MB" -f [math]::Round((Get-Item $target).Length / $oneMb, 1))
+    return $target
 }
 
 function Get-Json([string]$Url) {
@@ -74,34 +210,6 @@ function Get-GitHubAssetUrl {
 
     Write-Host "    版本 $($release.tag_name) / 文件 $($asset.name)"
     return $asset.browser_download_url
-}
-
-function Save-Download {
-    param([Parameter(Mandatory)][string]$Url)
-
-    $name = Split-Path $Url -Leaf
-    $target = Join-Path $downloadRoot $name
-    if (Test-Path $target) {
-        $size = [math]::Round((Get-Item $target).Length / 1MB, 1)
-        Write-Host "    已经下载过了：$name（$size MB）"
-        return $target
-    }
-
-    Write-Host "    正在下载 $name ..."
-    $curl = Get-CurlPath
-
-    if ($curl) {
-        # curl 在 Win10 1803+ 是系统自带的，边下边写盘，快而且内存占用低
-        & $curl -L --fail --retry 3 --retry-delay 2 -o $target $Url
-        if ($LASTEXITCODE -ne 0) { throw "下载失败（curl 退出码 $LASTEXITCODE）：$Url" }
-    }
-    else {
-        Invoke-WebRequest -Uri $Url -OutFile $target -MaximumRedirection 10
-    }
-
-    $size = [math]::Round((Get-Item $target).Length / 1MB, 1)
-    Write-Host "    下载完成：$size MB"
-    return $target
 }
 
 function Expand-Components {
@@ -141,7 +249,7 @@ if (-not $SkipFfmpeg) {
         if (-not $found) { throw "压缩包里没有找到 $executable" }
         Copy-Item $found.FullName -Destination (Join-Path $targetDirectory $executable) -Force
         Write-Host ("    已放置 tools\ffmpeg\bin\{0}（{1} MB）" -f $executable,
-            [math]::Round((Get-Item $found.FullName).Length / 1MB, 1))
+            [math]::Round((Get-Item $found.FullName).Length / $oneMb, 1))
     }
 
     Remove-Item $staging -Recurse -Force

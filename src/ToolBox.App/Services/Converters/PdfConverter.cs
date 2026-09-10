@@ -14,7 +14,11 @@ internal static class PdfConverter
         IProgress<ProgressInfo> progress,
         CancellationToken cancellationToken)
     {
-        var pdfToPpm = ToolLocator.Require(ToolKind.PdfToPpm);
+        // 两条路都能出图：装了 poppler 就用 poppler（兼容性最好），
+        // 没装就用 Windows 自带的 PDF 渲染，不需要用户为了这个功能再去装东西。
+        var pdfToPpm = ToolLocator.Find(ToolKind.PdfToPpm);
+        if (pdfToPpm is null)
+            return await PdfWindowsRenderer.RenderAsync(job, progress, cancellationToken).ConfigureAwait(false);
 
         var isJpeg = job.TargetExtension.Equals("jpg", StringComparison.OrdinalIgnoreCase) ||
                      job.TargetExtension.Equals("jpeg", StringComparison.OrdinalIgnoreCase);
@@ -106,6 +110,14 @@ internal static class PdfConverter
         IProgress<ProgressInfo> progress,
         CancellationToken cancellationToken)
     {
+        // PDF 转 Word 这一项离不了 LibreOffice。
+        // 实测过让 Word 自己打开 PDF（它确实能），但会弹一个「要不要转换」的确认框，
+        // 自动化的时候直接卡死，而且转出来的版式也乱。所以这条路不硬撑。
+        if (ToolLocator.Find(ToolKind.Soffice) is null)
+            return ConversionOutcome.Fail(
+                "PDF 转 Word 需要装一个 LibreOffice（免费）。" +
+                "其它 PDF 功能（转图片、转纯文本）现在就能用。");
+
         progress.Report(ProgressInfo.Busy("正在把 PDF 转成 Word…排版复杂的 PDF 可能需要几分钟。"));
 
         // writer_pdf_import：让 LibreOffice 用 Writer 而不是 Draw 来打开 PDF，

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using ToolBox.Models;
 
 namespace ToolBox.Services.Converters;
@@ -114,8 +115,26 @@ internal static class FfmpegConverter
         _ => null,
     };
 
-    /// <summary>问 FFmpeg 这个文件有多长（秒）。问不到就返回 0。</summary>
+    /// <summary>
+    /// 问出这个文件有多长（秒），用来算百分比进度。问不到就返回 0，界面自动切成滚动进度条。
+    ///
+    /// 两条路，先试好的：
+    ///   1. 有 ffprobe 就用 ffprobe（最准最快）
+    ///   2. 没有 ffprobe 就问 ffmpeg 自己 —— <c>ffmpeg -i 文件</c> 会把元信息打到 stderr，
+    ///      里面有一行 <c>Duration: 00:00:04.02</c>（这条命令没有输出文件，退出码是 1，但信息照样有）
+    ///
+    /// 为什么需要第 2 条：很多机器上的 ffmpeg 是别的软件自带的（B 站客户端、录屏工具之类），
+    /// 通常只带 ffmpeg.exe 不带 ffprobe.exe。有这条路，少一个组件也能有精确进度。
+    /// </summary>
     private static async Task<double> ProbeDurationAsync(string path, CancellationToken cancellationToken)
+    {
+        var fromProbe = await TryProbeWithFfprobeAsync(path, cancellationToken).ConfigureAwait(false);
+        if (fromProbe > 0) return fromProbe;
+
+        return await TryProbeWithFfmpegAsync(path, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<double> TryProbeWithFfprobeAsync(string path, CancellationToken cancellationToken)
     {
         var ffprobe = ToolLocator.Find(ToolKind.Ffprobe);
         if (ffprobe is null) return 0;
@@ -141,9 +160,47 @@ internal static class FfmpegConverter
         }
         catch
         {
-            // 读不出时长不影响转换，只是进度条变成不确定的。
             return 0;
         }
+    }
+
+    private static async Task<double> TryProbeWithFfmpegAsync(string path, CancellationToken cancellationToken)
+    {
+        var ffmpeg = ToolLocator.Find(ToolKind.Ffmpeg);
+        if (ffmpeg is null) return 0;
+
+        try
+        {
+            var result = await ProcessRunner.RunAsync(
+                ffmpeg,
+                ["-hide_banner", "-nostdin", "-i", path],
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            return ParseDurationLine(result.StandardError);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    /// <summary>从 <c>Duration: 00:01:23.45</c> 里把秒数抠出来。</summary>
+    internal static double ParseDurationLine(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return 0;
+
+        var match = Regex.Match(text, @"Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)");
+        if (!match.Success) return 0;
+
+        var hours = double.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+        var minutes = double.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
+        var seconds = double.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture);
+
+        return (hours * 3600) + (minutes * 60) + seconds;
     }
 
     /// <summary>解析 ffmpeg -progress 输出里的 <c>out_time=00:00:05.123456</c>。</summary>

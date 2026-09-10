@@ -13,8 +13,12 @@ public partial class App : Application
         base.OnStartup(e);
 
         AppLog.Write("==== 程序启动 ====");
-        AppLog.Write(AppPaths.OutputRoot);
+        AppLog.Write($"程序目录：{AppContext.BaseDirectory}");
+        AppLog.Write($"输出目录：{AppPaths.OutputRoot}");
         AppLog.Write(ToolBox.Services.Converters.ImageConverter.DescribeCapabilities());
+        AppLog.Write(ToolLocator.DescribeFoundTools());
+        AppLog.Write($"文档转换引擎：{ConversionService.DocumentEngineName}；" +
+                     $"PDF 转图片引擎：{ConversionService.PdfImageEngineName}");
 
         DispatcherUnhandledException += (_, args) =>
         {

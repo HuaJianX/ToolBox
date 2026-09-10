@@ -2,7 +2,10 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <!-- 带上 Windows 版本号是为了拿到 WinRT 投影：
+         内置的 Windows.Data.Pdf 可以离线把 PDF 渲染成图片，不需要装 poppler。
+         代价是要求 Windows 10 2004（19041）以上，Win11 更没问题。 -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
@@ -36,12 +39,17 @@
   <ItemGroup>
     <!-- 免安装的第三方转换组件（ffmpeg / poppler / pandoc）放在仓库根目录的 tools 下，
          发布时会被复制到程序目录的 tools 子目录，实现“离线可用”。
-         .downloads 是下载缓存，.ps1 / .md 是说明和脚本，都不该进安装包。 -->
+         .downloads 是下载缓存，.ps1 / .md 是说明和脚本，都不该进安装包。
+
+         ExcludeFromSingleFile 很关键：这些是"要被当子进程执行"的 exe，
+         必须实实在在躺在磁盘上。不排除的话，单文件发布会把它们塞进 exe 内部，
+         运行时 AppContext.BaseDirectory\tools 就是空的，功能全废。 -->
     <None Include="..\..\tools\**\*"
           Exclude="..\..\tools\*.ps1;..\..\tools\**\*.md;..\..\tools\.downloads\**\*"
           Link="tools\%(RecursiveDir)%(Filename)%(Extension)"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest"
+          ExcludeFromSingleFile="true"
           Condition="Exists('..\..\tools')" />
   </ItemGroup>
 

@@ -51,11 +51,62 @@ public static class ConversionService
     {
         var source = Path.GetExtension(job.SourcePath).TrimStart('.').ToLowerInvariant();
 
+        // Markdown 先交给 Pandoc 排版（没装 Pandoc 会自动退化成纯文本，见 PandocConverter）
         if (source is "md" or "markdown")
             return await PandocConverter.ConvertAsync(job, progress, cancellationToken).ConfigureAwait(false);
 
-        return await LibreOfficeConverter.ConvertAsync(job, progress, cancellationToken).ConfigureAwait(false);
+        return await ConvertPlainDocumentAsync(job, progress, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// 文档转 PDF 的优先级：
+    ///   1. LibreOffice —— headless，天生为命令行转换设计，不会跟用户正在用的 Office 抢实例
+    ///   2. Microsoft Office —— 本机装了就用 COM 自动化（不用为了这个功能再去装 350 MB 的东西）
+    ///   3. 都没有 —— 给一句人话
+    /// </summary>
+    internal static Task<ConversionOutcome> ConvertPlainDocumentAsync(
+        ConversionJob job,
+        IProgress<ProgressInfo> progress,
+        CancellationToken cancellationToken,
+        string? sourceOverride = null)
+    {
+        if (ToolLocator.Find(ToolKind.Soffice) is not null)
+            return LibreOfficeConverter.ConvertAsync(job, progress, cancellationToken, sourceOverride);
+
+        if (OfficeComConverter.IsAnyOfficeAvailable)
+            return OfficeComConverter.ConvertAsync(job, progress, cancellationToken, sourceOverride);
+
+        return Task.FromResult(ConversionOutcome.Fail(
+            "这台电脑上没找到能转文档的软件。装个 Microsoft Office 或者 LibreOffice（免费）就能用了。"));
+    }
+
+    /// <summary>这台机器现在能不能把文档转成 PDF。</summary>
+    public static bool CanConvertDocuments =>
+        ToolLocator.Find(ToolKind.Soffice) is not null || OfficeComConverter.IsAnyOfficeAvailable;
+
+    /// <summary>文档转换实际靠的是谁，写在日志和自检里，排错时一眼看明白。</summary>
+    public static string DocumentEngineName =>
+        ToolLocator.Find(ToolKind.Soffice) is not null ? "LibreOffice"
+        : OfficeComConverter.IsAnyOfficeAvailable ? "Microsoft Office（COM 自动化）"
+        : "无";
+
+    /// <summary>
+    /// PDF 转图片现在能不能用。两条路有其一就行：
+    /// 装了 poppler 用 poppler；没装就用 Windows 10 1809+ 自带的 PDF 渲染。
+    /// </summary>
+    public static bool CanRenderPdfToImages =>
+        ToolLocator.Find(ToolKind.PdfToPpm) is not null ||
+        OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041);
+
+    /// <summary>PDF 转图片实际走的是哪条路。</summary>
+    public static string PdfImageEngineName =>
+        ToolLocator.Find(ToolKind.PdfToPpm) is not null
+            ? "Poppler（pdftoppm）"
+            : "Windows 内置渲染（Windows.Data.Pdf）";
+
+    /// <summary>PDF 转纯文本能不能用。</summary>
+    public static bool CanExtractPdfText =>
+        ToolLocator.Find(ToolKind.PdfToText) is not null || ToolLocator.Find(ToolKind.Soffice) is not null;
 
     private static async Task<ConversionOutcome> ConvertPdfAsync(
         ConversionJob job,

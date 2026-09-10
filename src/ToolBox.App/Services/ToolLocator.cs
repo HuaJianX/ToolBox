@@ -54,6 +54,22 @@ public static class ToolLocator
     public static bool IsAvailable(params ToolKind[] kinds) =>
         kinds.All(kind => Find(kind) is not null);
 
+    /// <summary>
+    /// 启动时写进日志：各个组件到底找到了没有、在哪找到的。
+    /// 用户说「某个功能用不了」的时候，看一眼日志就明白了。
+    /// </summary>
+    public static string DescribeFoundTools()
+    {
+        var parts = new List<string>();
+        foreach (var kind in Enum.GetValues<ToolKind>())
+        {
+            var path = Find(kind);
+            parts.Add($"{kind}={(path is null ? "没找到" : path)}");
+        }
+
+        return "组件自检：" + string.Join("；", parts);
+    }
+
     private static string? Locate(ToolKind kind)
     {
         var fileNames = FileNamesFor(kind);
