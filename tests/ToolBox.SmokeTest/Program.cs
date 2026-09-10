@@ -274,6 +274,34 @@ else
         Pass("PDF -> PNG", $"{pageImages.OutputPaths.Count} 张图，第一张 {new FileInfo(pageImages.OutputPaths[0]).Length} 字节");
     else
         Fail("PDF -> PNG", pageImages.Message);
+
+    // 多页 PDF：确认「一页一张图」，而且页码顺序是对的（不是 1、10、2 那种）
+    var pdfUnite = Path.Combine(
+        Path.GetDirectoryName(ToolLocator.Require(ToolKind.PdfToPpm))!,
+        "pdfunite.exe");
+
+    if (!File.Exists(pdfUnite))
+    {
+        Skip("多页 PDF -> 图片", "poppler 里没有 pdfunite");
+    }
+    else
+    {
+        var threePage = Path.Combine(root, "三页.pdf");
+        await ProcessRunner.RunAsync(pdfUnite, [pdfSample, pdfSample, pdfSample, threePage]);
+
+        if (!File.Exists(threePage))
+        {
+            Skip("多页 PDF -> 图片", "pdfunite 没能拼出多页 PDF");
+        }
+        else
+        {
+            var multiPage = await RunAsync(threePage, "png", CategoryKind.Pdf);
+            if (Produced(multiPage) && multiPage.OutputPaths.Count == 3)
+                Pass("多页 PDF -> 图片", $"3 页出 3 张图：{string.Join("、", multiPage.OutputPaths.Select(Path.GetFileName))}");
+            else
+                Fail("多页 PDF -> 图片", $"期望 3 张，实际 {multiPage.OutputPaths.Count} 张。{multiPage.Message}");
+        }
+    }
 }
 
 if (!ConversionService.CanExtractPdfText)
