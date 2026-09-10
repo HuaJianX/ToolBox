@@ -276,13 +276,17 @@ else
         Fail("PDF -> PNG", pageImages.Message);
 
     // 多页 PDF：确认「一页一张图」，而且页码顺序是对的（不是 1、10、2 那种）
-    var pdfUnite = Path.Combine(
-        Path.GetDirectoryName(ToolLocator.Require(ToolKind.PdfToPpm))!,
-        "pdfunite.exe");
+    // 注意：这里必须用 Find 而不是 Require。
+    // CI 机器上没装 poppler，用 Require 会直接抛异常把整个自检打崩
+    // （本机装了 poppler 反而测不出来 —— 是 CI 抓到的这个问题）。
+    var pdfToPpmPath = ToolLocator.Find(ToolKind.PdfToPpm);
+    var pdfUnite = pdfToPpmPath is null
+        ? null
+        : Path.Combine(Path.GetDirectoryName(pdfToPpmPath)!, "pdfunite.exe");
 
-    if (!File.Exists(pdfUnite))
+    if (pdfUnite is null || !File.Exists(pdfUnite))
     {
-        Skip("多页 PDF -> 图片", "poppler 里没有 pdfunite");
+        Skip("多页 PDF -> 图片", "本机没有 poppler 的 pdfunite，跳过");
     }
     else
     {
