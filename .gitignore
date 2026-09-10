@@ -1,0 +1,19 @@
+# 编译产物
+bin/
+obj/
+dist/
+
+# 第三方转换组件：用 tools/get-tools.ps1 下载，别进版本库（ffmpeg 就有 170 MB）
+tools/.downloads/
+tools/ffmpeg/
+tools/poppler/
+tools/pandoc/
+tools/LibreOffice/
+
+# 程序运行时生成的东西
+转换结果/
+*.user
+.vs/
+
+# 第三方版权素材：不进公开仓库，放一张自己的 iPhone 照片进来即可（见 tests/assets/README.md）
+tests/assets/sample.heic

@@ -1,0 +1,38 @@
+MIT License
+
+Copyright (c) 2026 HuaJianX
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---------------------------------------------------------------------------
+
+注意：本许可只覆盖本仓库自己的代码。
+
+程序运行时依赖的第三方组件各有各的许可，本仓库不包含它们（由 tools/get-tools.ps1
+在用户机器上下载，或由用户自行安装）：
+
+  FFmpeg      LGPL / GPL（取决于具体构建）
+  Poppler     GPL
+  Pandoc      GPL
+  LibreOffice MPL-2.0
+  Magick.NET / ImageMagick   Apache-2.0 / ImageMagick License
+
+商用或再分发前请自行确认这些组件的许可条款。
+
+tests/assets/dummy.pdf 来自 W3C 的公开测试素材，版权归 W3C。

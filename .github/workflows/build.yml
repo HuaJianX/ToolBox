@@ -1,0 +1,29 @@
+name: build-and-test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 装 .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: 编译
+        run: dotnet build ToolBox.slnx -c Release
+
+      - name: 自检（转换引擎）
+        # 这个自检的设计是：装了外部组件就做真实转换，没装就退回去验证「缺组件时的中文提示」。
+        # CI 里没有 ffmpeg / LibreOffice / Poppler，所以图片部分是真转，
+        # 音视频和文档部分验证的是提示文案 —— 两种情况都会让它保持有意义，不会假绿。
+        run: dotnet run --project tests\ToolBox.SmokeTest\ToolBox.SmokeTest.csproj -c Release --no-build

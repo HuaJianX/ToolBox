@@ -1,0 +1,16 @@
+# 统一换行符，免得 Windows / Linux 之间来回改、diff 全是噪音
+* text=auto
+
+# 二进制，任何转换都不要做
+*.ico  binary
+*.png  binary
+*.pdf  binary
+*.heic binary
+*.dll  binary
+*.exe  binary
+
+# 脚本保持 Windows 换行，右键运行 / 双击更稳
+# 注意：.ps1 和 .iss 必须带 UTF-8 BOM，否则中文会乱码（BOM 由 git 原样保留）
+*.ps1 text eol=crlf
+*.iss text eol=crlf
+*.slnx text eol=crlf

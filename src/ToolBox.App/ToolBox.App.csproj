@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+
+    <AssemblyName>电脑工具百宝箱</AssemblyName>
+    <RootNamespace>ToolBox</RootNamespace>
+    <Product>电脑工具百宝箱</Product>
+    <AssemblyTitle>电脑工具百宝箱</AssemblyTitle>
+    <Description>本地离线文件格式转换工具：图片、文档、PDF、音频、视频。无广告，不上传文件。</Description>
+    <Version>1.0.0</Version>
+    <FileVersion>1.0.0.0</FileVersion>
+    <Company>本地工具</Company>
+    <Copyright>免费 · 离线 · 无广告</Copyright>
+
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <NeutralLanguage>zh-Hans</NeutralLanguage>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WPF 项目的隐式 using 里没有 System.IO（默认只有 System / Collections.Generic /
+         Linq / Threading / Threading.Tasks），而本程序到处都在读写文件，所以补上。 -->
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 免安装的第三方转换组件（ffmpeg / poppler / pandoc）放在仓库根目录的 tools 下，
+         发布时会被复制到程序目录的 tools 子目录，实现“离线可用”。
+         .downloads 是下载缓存，.ps1 / .md 是说明和脚本，都不该进安装包。 -->
+    <None Include="..\..\tools\**\*"
+          Exclude="..\..\tools\*.ps1;..\..\tools\**\*.md;..\..\tools\.downloads\**\*"
+          Link="tools\%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          Condition="Exists('..\..\tools')" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Magick.NET-Q16-x64" Version="14.17.1" />
+  </ItemGroup>
+
+</Project>

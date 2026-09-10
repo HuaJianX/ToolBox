@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ToolBox.App/ToolBox.App.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ToolBox.SmokeTest/ToolBox.SmokeTest.csproj" />
+  </Folder>
+</Solution>
