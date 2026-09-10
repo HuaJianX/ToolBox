@@ -1,5 +1,9 @@
 # 电脑工具百宝箱
 
+[![build-and-test](https://github.com/HuaJianX/ToolBox/actions/workflows/build.yml/badge.svg)](https://github.com/HuaJianX/ToolBox/actions/workflows/build.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![platform: Windows 10/11](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4.svg)
+
 Windows 桌面上的文件格式转换工具。**本地离线、不要钱、无广告、不登录、不捆绑、不上传文件。**
 
 首页就五个大按钮，每次转换三步：**选文件 → 选目标格式 → 开始转换**。
@@ -46,7 +50,12 @@ powershell -ExecutionPolicy Bypass -File tools\get-tools.ps1
 dotnet run --project tests\ToolBox.SmokeTest -c Release
 ```
 
-当前结果（本机实测）：**通过 14 项，失败 0 项**，包含两个真实 HEIC 样张的转码。
+当前结果（本机实测）：**通过 13 项，失败 0 项**，包含两个真实 HEIC 样张的转码。
+
+> HEIC 样张有第三方版权，**没有放进仓库**，所以全新克隆下来跑会是
+> **10 项通过 + 1 项跳过**（跳过时它会打印原因，不会假装通过）。
+> 想把这一项也跑起来，自己放一张 iPhone 照片到 `tests\assets\sample.heic` 就行，
+> 详见 `tests\assets\README.md`。
 
 ---
 
@@ -155,6 +164,8 @@ src\ToolBox.App\
 
 ## 开源与许可
 
-本项目代码可自由使用。分发的第三方组件各有各的许可，商用前请自行确认：
-FFmpeg（LGPL/GPL，取决于构建）、Poppler（GPL）、Pandoc（GPL）、
-LibreOffice（MPL）、Magick.NET / ImageMagick（Apache-2.0 / ImageMagick License）。
+本仓库的代码用 **MIT 许可**，见 [LICENSE](LICENSE)。
+
+运行时依赖的第三方组件（FFmpeg / Poppler / Pandoc / LibreOffice / Magick.NET）
+**不在本仓库里**，各有各的许可，商用或再分发前请看
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。

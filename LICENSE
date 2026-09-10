@@ -19,20 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----------------------------------------------------------------------------
-
-注意：本许可只覆盖本仓库自己的代码。
-
-程序运行时依赖的第三方组件各有各的许可，本仓库不包含它们（由 tools/get-tools.ps1
-在用户机器上下载，或由用户自行安装）：
-
-  FFmpeg      LGPL / GPL（取决于具体构建）
-  Poppler     GPL
-  Pandoc      GPL
-  LibreOffice MPL-2.0
-  Magick.NET / ImageMagick   Apache-2.0 / ImageMagick License
-
-商用或再分发前请自行确认这些组件的许可条款。
-
-tests/assets/dummy.pdf 来自 W3C 的公开测试素材，版权归 W3C。
